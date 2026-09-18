@@ -1,0 +1,73 @@
+name: Build Debug APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - v2
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: v2
+          submodules: recursive
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+
+      - name: Download bundled libretro cores
+        env:
+          BUILDBOT: https://buildbot.libretro.com/nightly/android/latest
+          CORES: >-
+            gambatte genesis_plus_gx handy mednafen_ngp mednafen_pce_fast
+            mednafen_vb mednafen_wswan mgba nestopia pcsx_rearmed pokemini
+            prosystem snes9x stella swanstation
+        run: |
+          for arch in arm64-v8a armeabi-v7a; do
+            dir="app/src/main/jniLibs/${arch}"
+            mkdir -p "$dir"
+            for core in $CORES; do
+              name="${core}_libretro_android.so"
+              echo "Downloading ${arch}/${name}"
+              curl -fL "${BUILDBOT}/${arch}/${name}.zip" -o /tmp/core.zip
+              unzip -o -q /tmp/core.zip -d "$dir"
+              rm -f /tmp/core.zip
+            done
+          done
+
+      - name: Fetch RetroArch autoconfig cfgs
+        run: |
+          chmod +x scripts/fetch-autoconfig.sh
+          ./scripts/fetch-autoconfig.sh
+
+      - name: Build debug APK
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cannoli-v2-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
