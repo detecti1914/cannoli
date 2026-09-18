@@ -24,13 +24,22 @@ jobs:
           java-version: 21
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: cmdline-tools;latest,platform-tools,platforms;android-36,build-tools;36.0.0
+      - name: Install Android command line tools
+        shell: bash
+        env:
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        run: |
+          mkdir -p "$ANDROID_SDK_ROOT"
+          curl -fL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdline-tools.zip
+          unzip -o -q /tmp/cmdline-tools.zip -d "$ANDROID_SDK_ROOT"
 
-      - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses
+          # Google zip extracts to "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" --install \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" --licenses
 
       - name: Set up Android NDK
         id: setup-ndk
