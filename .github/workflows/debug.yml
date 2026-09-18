@@ -24,14 +24,13 @@ jobs:
           java-version: 21
           cache: gradle
 
-      - name: Install Android SDK
-        shell: bash
-        run: |
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager --install \
-            "platform-tools" \
-            "platforms;android-36" \
-            "build-tools;36.0.0"
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: cmdline-tools;latest,platform-tools,platforms;android-36,build-tools;36.0.0
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses
 
       - name: Set up Android NDK
         id: setup-ndk
