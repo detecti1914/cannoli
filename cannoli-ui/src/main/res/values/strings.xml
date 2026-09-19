@@ -42,6 +42,8 @@
     <string name="label_parent">PARENT</string>
     <string name="label_slot">SLOT</string>
     <string name="label_disc">DISC</string>
+    <!-- Legend label for the action that puts every button back to its own button on the button mapping screen -->
+    <string name="label_reset_all">RESET ALL</string>
     <string name="igm_resume">Resume</string>
     <string name="label_achievements">Achievements</string>
     <string name="igm_switch_disc">Switch Disc</string>
@@ -53,7 +55,6 @@
     <string name="igm_slot_auto">Auto</string>
     <!-- %1$d = save state slot number. -->
     <string name="igm_slot_numbered">Slot %1$d</string>
-    <!-- %1$d = controller port, counting from 1. -->
     <!-- %1$d = disc number, counting from 1. -->
     <string name="igm_disc_number">Disc %1$d</string>
     <string name="label_use_location">USE THIS LOCATION</string>
@@ -79,11 +80,21 @@
     <string name="label_filter">FILTER</string>
     <string name="label_unlocked">UNLOCKED</string>
     <string name="label_locked">LOCKED</string>
+    <!-- Filter on the in-game achievements list: only those unlocked offline and not yet sent to the server -->
+    <string name="label_unsynced">UNSYNCED</string>
     <string name="label_remap">REMAP</string>
     <string name="label_unmap">UNMAP</string>
     <string name="label_grant">GRANT</string>
+    <!-- Bottom-bar button on Reassign Players; exchanges the pads of the marked player and this one. -->
+    <string name="label_swap">SWAP</string>
     <!-- In-game menu action: reassign connected controllers to player slots. -->
     <string name="igm_reassign_players">Reassign Players</string>
+    <!-- In-game Input setting: which controller the core emulates for Player 1, shown when at most one pad is connected. -->
+    <string name="igm_controller_type">Controller Type</string>
+    <!-- In-game Input setting: which controller the core emulates for one player. %1$d is the player number, counted from 1. -->
+    <string name="igm_player_controller">Player %1$d Controller</string>
+    <!-- In-game Reassign Players row label. %1$d is the player number, counted from 1. -->
+    <string name="igm_player">Player %1$d</string>
 
     <!-- In-game shortcut actions -->
     <string name="shortcut_action_save_state">Save State</string>
@@ -258,7 +269,6 @@
     <string name="setting_color_accent">Accent</string>
     <string name="setting_color_background">Background</string>
     <string name="setting_color_status_bar">Status Bar</string>
-    <!-- Screen title. %s is the emulator app name (e.g. RetroArch). -->
     <!-- Settings row that refreshes every installed core. -->
     <string name="setting_update_cores">Update Cores</string>
     <string name="setting_update_shaders">Update Shaders</string>
@@ -377,7 +387,6 @@
     <string name="save_conflict_title">Save conflict</string>
     <string name="save_conflict_keep_local">Keep This Device</string>
     <string name="save_conflict_use_server">Use Server</string>
-    <string name="save_conflict_subtitle">Changed here and on the server</string>
     <string name="save_stale_title">Server has a newer save</string>
     <string name="save_stale_play_local">Play Local Anyway</string>
     <string name="setting_romm_allow_self_signed">Allow Self-Signed Cert</string>
@@ -515,7 +524,6 @@
     <!-- Setting values -->
     <string name="value_on">On</string>
     <string name="value_off">Off</string>
-    <!-- Force Softcore row value when a manual RA Game ID pins it on. -->
     <!-- A manual Game ID is an unofficial match, where hardcore is not valid. -->
     <string name="achievements_mode_locked">Softcore (forced by Game ID)</string>
     <string name="value_all">All</string>
@@ -648,7 +656,6 @@
     <string name="onboarding_select_folder">SELECT FOLDER</string>
 
     <!-- Controller setup wizard. Each question asks what a button does, never where it sits. -->
-    <!-- Why the wizard appeared. Shown on its first question only. -->
     <string name="controller_wizard_press_confirm">Press the button you use to confirm</string>
     <string name="controller_wizard_press_back">Press the button you use to go back</string>
     <!-- The second press of confirm and of back. It guards a mis-press: the user's chance to catch
@@ -856,18 +863,27 @@
     <!-- IGM screen titles -->
     <!-- Title of the IGM shortcut list. -->
     <string name="igm_shortcuts_title">Shortcuts</string>
+    <!-- Title of the in-game screen where a player changes what each pad button does in the game -->
+    <string name="igm_button_mappings">Button Mappings</string>
+    <!-- Name of the up direction on the pad -->
+    <string name="igm_button_up">Up</string>
+    <!-- Name of the down direction on the pad -->
+    <string name="igm_button_down">Down</string>
+    <!-- Name of the left direction on the pad -->
+    <string name="igm_button_left">Left</string>
+    <!-- Name of the right direction on the pad -->
+    <string name="igm_button_right">Right</string>
+    <!-- Name of the left shoulder button -->
+    <string name="igm_button_l">L</string>
+    <!-- Name of the right shoulder button -->
+    <string name="igm_button_r">R</string>
+    <!-- Shown for a button that has been unbound, so it does nothing in the game -->
+    <string name="igm_button_unbound" translatable="false">-</string>
+    <!-- Shown on a row that is waiting for the player to press the button it should send -->
+    <string name="igm_button_listening" translatable="false">…</string>
     <!-- Shown on a shortcut row while it waits for a chord to be held. -->
     <string name="igm_shortcut_listening">Hold a chord</string>
     <string name="igm_video">Video</string>
-    <!-- In-game settings category for sound options. -->
-    <!-- Audio settings subcategory: the sound backend and its buffering. -->
-    <!-- Audio settings subcategory: how audio timing is kept in step with the picture. -->
-    <!-- Video settings subcategory: how the picture reaches the screen, such as refresh rate. -->
-    <!-- Video settings subcategory: how the picture is sized, stretched and cropped. -->
-    <!-- Video settings subcategory: how drawing is timed against the display refresh. -->
-    <!-- In-game settings category for options that trade responsiveness against smoothness. -->
-    <!-- In-game settings category for fast-forward, slow motion and rewind. -->
-    <!-- In-game settings category for readouts drawn on top of the game, such as the FPS counter. -->
     <!-- Generic value: a setting is turned off. -->
     <string name="igm_off">Off</string>
     <!-- Prompt on leaving in-game settings: keep the changes for every game on this system. %1$s is the platform name, for example "Game Boy". -->
@@ -882,10 +898,8 @@
     <string name="igm_reset_platform">Reset %1$s</string>
     <!-- Resets this one game only. -->
     <string name="igm_reset_game">Reset this game</string>
-    <!-- Opens RetroArch's own menu. Debug builds only. Keep "RetroArch" as the product name. -->
     <!-- Bottom bar hint: the D-pad scrolls the text on screen. Uppercase to match the other bottom bar labels. -->
     <string name="label_scroll">SCROLL</string>
-    <!-- On-Screen Display setting: show a brief message over the game when it is reset. -->
     <!-- In-game settings category showing read-only facts about the running emulator core. -->
     <string name="igm_info">Info</string>
     <string name="igm_overlay">Overlay</string>
@@ -929,7 +943,6 @@
     <string name="igm_info_content">ROM</string>
     <!-- Info row: the save file this game reads and writes. -->
     <string name="igm_info_save">Save</string>
-    <!-- Info row: the RetroAchievements id for this game, absent when it was not recognised. -->
     <!-- Info row label: what became of achievements this launch. -->
     <string name="igm_info_achievements">RetroAchievements</string>
     <!-- Its values: a state, then the reason in brackets. Offline is a reason for being inactive
@@ -940,6 +953,7 @@
     <string name="igm_achievements_unrecognised">Inactive (Game not recognized)</string>
     <string name="igm_achievements_none">Inactive (No achievements)</string>
     <string name="igm_achievements_offline">Inactive (Could not reach server)</string>
+    <!-- Info row: the RetroAchievements id for this game, absent when it was not recognised. -->
     <string name="igm_info_game_id">RA Game ID</string>
     <!-- Info row: the checksum achievements were looked up by. Keep short; it is a hex string. -->
     <string name="igm_info_hash">RA Hash</string>
@@ -974,8 +988,6 @@
     <string name="igm_curated_debug_hud">Debug HUD</string>
     <string name="igm_emulator">Emulator</string>
     <string name="igm_save_changes">Save Changes</string>
-    <!-- D-Pad Mode value: 8 directions. -->
-    <!-- D-Pad Mode value: 4 directions. -->
     <string name="title_guide">Guide</string>
 
     <!-- IGM dialogs -->
@@ -1039,8 +1051,6 @@
     <string name="filter_mapped">MAPPED</string>
     <string name="value_unmapped">Unmapped</string>
     <string name="label_download">DOWNLOAD</string>
-    <!-- OSD toast. %1$s = core name. -->
-    <!-- OSD when a core joins the download queue. %1$s = the core name. -->
     <!-- OSD when a transfer lands, for someone not watching the queue. %1$s = its name. -->
     <string name="osd_download_done_one">%1$s downloaded</string>
     <string name="osd_download_failed_one">%1$s failed</string>
@@ -1052,6 +1062,7 @@
         <item quantity="one">%1$d download failed</item>
         <item quantity="other">%1$d downloads failed</item>
     </plurals>
+    <!-- OSD when a core joins the download queue. %1$s = the core name. -->
     <string name="osd_core_queued">%1$s queued</string>
     <string name="bios_required">REQUIRED</string>
     <string name="bios_optional">OPTIONAL</string>
@@ -1104,7 +1115,20 @@
     <string name="achievos_offline_sets_empty">No achievement sets cached</string>
     <!-- %1$d = achievement count, %2$s = set name. -->
     <string name="achievos_offline_set_value">%1$d Achievements - %2$s</string>
+    <!-- Offline set row when the cache is over a month old. %1$d = achievement count, %2$s = when it
+         was cached, such as "2 months ago". -->
+    <string name="achievos_offline_set_value_stale">%1$d Achievements - %2$s (stale)</string>
+    <!-- Offline set row for a game with unlocks waiting to be sent. %1$d = how many. -->
+    <plurals name="achievos_offline_pending">
+        <item quantity="one">%1$d unsynced</item>
+        <item quantity="other">%1$d unsynced</item>
+    </plurals>
+    <!-- Shown on the in-game achievements screen when the set came from Cannoli's cache because the
+         server could not be reached. %1$s is how long ago it was cached, such as "3 days ago". -->
+    <string name="ach_offline_cached">Offline - cached %1$s</string>
     <string name="label_refresh">REFRESH</string>
+    <!-- Footer action on the offline sets screen: send queued unlocks to RetroAchievements now -->
+    <string name="label_sync_now">SYNC NOW</string>
 
     <!-- Save Slots screen -->
     <!-- Screen title. %1$s = game name. -->
@@ -1129,6 +1153,18 @@
     <plurals name="quick_menu_conflicts">
         <item quantity="one">Sync Conflicts (1)</item>
         <item quantity="other">Sync Conflicts (%1$d)</item>
+    </plurals>
+    <!-- %1$d = number of achievements unlocked offline and not yet sent to RetroAchievements. -->
+    <plurals name="quick_menu_unsynced_unlocks">
+        <item quantity="one">Sync Unlocks (1)</item>
+        <item quantity="other">Sync Unlocks (%1$d)</item>
+    </plurals>
+    <string name="achievos_osd_sync_unreachable">Could not reach RetroAchievements</string>
+    <!-- Shown after syncing unlocks earned offline. %1$d = how many the server took, which can be
+         zero when it answered and refused them. -->
+    <plurals name="achievos_osd_sync_done">
+        <item quantity="one">1 unlock synced</item>
+        <item quantity="other">%1$d unlocks synced</item>
     </plurals>
     <string name="sync_errors_title">Sync Errors</string>
     <string name="sync_errors_empty">No sync errors</string>

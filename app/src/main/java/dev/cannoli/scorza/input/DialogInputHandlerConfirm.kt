@@ -199,6 +199,7 @@ internal fun DialogInputHandler.confirmDialog(): Boolean {
                 dev.cannoli.scorza.ui.quickmenu.QuickMenuRow.SYNC_HISTORY -> openSyncHistory()
                 dev.cannoli.scorza.ui.quickmenu.QuickMenuRow.CONFLICTS -> openConflictsMenu(fromSaveSyncMenu = false)
                 dev.cannoli.scorza.ui.quickmenu.QuickMenuRow.ERRORS -> openSyncErrors(fromSaveSyncMenu = false)
+                dev.cannoli.scorza.ui.quickmenu.QuickMenuRow.UNSYNCED_UNLOCKS -> syncQueuedUnlocks()
                 dev.cannoli.scorza.ui.quickmenu.QuickMenuRow.KITCHEN -> launcherActions.openKitchen(fromQuickMenu = true)
                 dev.cannoli.scorza.ui.quickmenu.QuickMenuRow.RESCAN -> launcherActions.rescanWithProgress()
                 dev.cannoli.scorza.ui.quickmenu.QuickMenuRow.INFO -> {
@@ -289,4 +290,27 @@ private fun DialogInputHandler.hasActiveVpn(): Boolean {
     val net = cm.activeNetwork ?: return false
     val caps = cm.getNetworkCapabilities(net) ?: return false
     return caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+}
+
+/**
+ * Sends the unlocks earned offline, without leaving the quick menu.
+ *
+ * The menu is rebuilt rather than closed, because the row carries the count: it shrinks or leaves
+ * on its own when the server takes them, and a drain that reached nothing says so by staying put.
+ */
+private fun DialogInputHandler.syncQueuedUnlocks() {
+    ioScope.launch {
+        val result = raPendingDrainer.drain()
+        // A count cannot say the difference between the server refusing them and never being asked,
+        // and only one of those is the player's to fix.
+        osdController.show(
+            if (!result.reached) context.getString(dev.cannoli.ui.R.string.achievos_osd_sync_unreachable)
+            else context.resources.getQuantityString(
+                dev.cannoli.ui.R.plurals.achievos_osd_sync_done,
+                result.submitted,
+                result.submitted,
+            )
+        )
+        openQuickMenu(dev.cannoli.scorza.ui.quickmenu.QuickMenuRow.UNSYNCED_UNLOCKS)
+    }
 }

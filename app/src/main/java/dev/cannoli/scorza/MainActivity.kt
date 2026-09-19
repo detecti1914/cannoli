@@ -15,6 +15,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
@@ -129,10 +130,12 @@ class MainActivity : ComponentActivity(), ActivityActions {
     // Behind a Provider so the id backfill, and the scan scheduler it listens to, stay out of the
     // boot graph until the launcher is actually in front with a library to work on.
     @Inject lateinit var sigilBackfill: Provider<dev.cannoli.scorza.sigil.SigilBackfillService>
+    @Inject lateinit var saveMigrationSweep: Provider<dev.cannoli.scorza.saves.SaveMigrationSweep>
     @Inject lateinit var saveSyncStatusHolder: dev.cannoli.scorza.romm.sync.SaveSyncStatusHolder
     @Inject lateinit var cannoliPathsProvider: dev.cannoli.scorza.di.CannoliPathsProvider
     @field:dev.cannoli.scorza.di.IoScope @Inject lateinit var ioScope: kotlinx.coroutines.CoroutineScope
     @Inject lateinit var raLoginController: dev.cannoli.scorza.achievements.RaLoginController
+    @Inject lateinit var raPendingDrainer: Provider<dev.cannoli.scorza.achievements.RaPendingDrainer>
 
     private val isTv: Boolean by lazy { dev.cannoli.scorza.util.DeviceType.isTv(this) }
 
@@ -252,11 +255,27 @@ class MainActivity : ComponentActivity(), ActivityActions {
         lifecycleScope.launch {
             lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 bootSequencer.state.first { it is BootState.Ready }
+                // Saves first, and to completion. It decides whether a save is findable at all,
+                // while the id drain only fills a column nothing reads yet, so letting the two
+                // compete for the card would slow the one that matters. Cancelled if the launcher
+                // goes away, and it resumes from the top next time.
+                saveMigrationSweep.get().runOnce()
                 val backfill = sigilBackfill.get()
                 backfill.setActive(true)
+                // An unlock earned offline should reach the server while the player is still on the
+                // game list, so this runs when the launcher comes forward rather than on a timer,
+                // and the listener below covers the rest of that visit: coming back from a game is
+                // a foreground transition, turning wifi on while sitting here is not.
+                ioScope.launch { runCatching { raPendingDrainer.get().drain() } }
+                val reconnectDrain = dev.cannoli.scorza.achievements.RaReconnectDrain(
+                    context = this@MainActivity,
+                    scope = ioScope,
+                ) { runCatching { raPendingDrainer.get().drain() } }
+                reconnectDrain.start()
                 try {
                     awaitCancellation()
                 } finally {
+                    reconnectDrain.stop()
                     backfill.setActive(false)
                 }
             }
@@ -268,7 +287,10 @@ class MainActivity : ComponentActivity(), ActivityActions {
             val themeFont = appSettings?.fontFamily ?: appFonts.mplus1Code
             dev.cannoli.scorza.i18n.ProvideLocalizedResources(appSettings?.languageTag) {
             CannoliTheme(fontFamily = themeFont, iconFontFamily = appFonts.mplus1Code) {
-                Surface(modifier = Modifier.fillMaxSize()) {
+                // Every boot state renders under this one Surface, so this is the single place
+                // that keeps content out of the display cutout; AppNavGraph used to repeat this
+                // for the Ready path alone, which left the boot-time screens unprotected.
+                Surface(modifier = Modifier.fillMaxSize().displayCutoutPadding()) {
                     CompositionLocalProvider(
                         LocalViewportInsets provides ViewportInsetsPx(
                             geometryWidthPct = settings.screenGeometryWidth,

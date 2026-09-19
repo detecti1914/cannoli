@@ -211,20 +211,22 @@ class LaunchManager(
         val baseConfig = try { File(base).readText() } catch (_: IOException) { return null }
         val paths = CannoliPaths(settings.sdCardRoot)
         val romName = normalizedRomName(rom)
-        // The preference stack, weakest to strongest: global, this platform, this one game, then
-        // the user's own custom.cfg. The plumbing band applied below always wins over all of them -
-        // see applyOverrides below and #36 in the launch config design. Each of the two middle
-        // scopes is a pair: a core-independent tier under the core-keyed one. Keying by core is
-        // right for values that describe how a core behaves, since run-ahead compensates a specific
-        // core's internal latency, and it is wrong for values that describe how a platform or game
-        // should look - an overlay is the same choice whichever core runs it, so a core-keyed tier
-        // would silently drop it on a remap. Core-specific sits above core-independent within a
-        // scope because it is the narrower statement of the two.
+        // The preference stack, weakest to strongest: global, the platform's shipped defaults, this
+        // platform, this one game, then the user's own custom.cfg. The plumbing band applied below
+        // always wins over all of them - see applyOverrides below and #36 in the launch config
+        // design. Each of the two middle scopes is a pair: a core-independent tier under the
+        // core-keyed one. Keying by core is right for values that describe how a core behaves,
+        // since run-ahead compensates a specific core's internal latency, and it is wrong for
+        // values that describe how a platform or game should look - an overlay is the same choice
+        // whichever core runs it, so a core-keyed tier would silently drop it on a remap.
+        // Core-specific sits above core-independent within a scope because it is the narrower
+        // statement of the two.
         writeGlobalDefaults(paths)
         val preferenceBase = RetroArchConfigComposer.compose(
             baseConfig,
             listOf(
                 readOverrideLayer(paths.globalOverrideCfg),
+                stickDpadDefaults(rom.platformTag),
                 readOverrideLayer(paths.systemSharedCfg(rom.platformTag)),
                 readOverrideLayer(paths.systemOverrideCfg(rom.platformTag, core)),
                 readOverrideLayer(paths.gameSharedCfg(rom.platformTag, romName)),
@@ -234,7 +236,18 @@ class LaunchManager(
         )
         val stateDir = paths.saveStateDir(rom.platformTag, romName, core)
         stateDir.mkdirs()
-        val saveDir = paths.savesFor(rom.platformTag)
+        // Just in time, before the config names the folder: the background sweep may not have
+        // reached this game yet, and a game launched into a folder its save has not moved to would
+        // start with no save at all. Idempotent, so a migrated game costs a directory listing.
+        dev.cannoli.scorza.saves.SaveMigration(paths).migrateGame(rom.platformTag, romName)
+        // A platform whose core keeps one memory stick for everything keeps it: PPSSPP files a
+        // game inside SAVEDATA by disc id, games there read each other's saves, and Argosy points
+        // at the same shared root, so a per-game stick would break both.
+        val saveDir = if (dev.cannoli.scorza.saves.SharedSaveRoots.isShared(rom.platformTag)) {
+            paths.savesFor(rom.platformTag)
+        } else {
+            paths.saveDirFor(rom.platformTag, romName)
+        }
         saveDir.mkdirs()
         val biosDir = prepareBios(rom.platformTag, paths.biosFor(rom.platformTag))
         val raSlot = if (slot > 0) slot - 1 else 0
@@ -247,12 +260,13 @@ class LaunchManager(
             put("sort_savestates_by_content_enable", "false")
             // Named outright rather than derived. RetroArch's by-content sorting appends the ROM's
             // parent directory, which is the platform directory only for a loose ROM: a bundled
-            // multi-disc game at Roms/PSX/Game/disc1.cue would land in Saves/Game. Resolving the
-            // platform tag here keeps every game on one system in Saves/<tag>, which is where the
-            // launcher and save sync both look.
+            // multi-disc game at Roms/PSX/Game/disc1.cue would land in Saves/Game. Naming the
+            // folder here puts every save for one game in Saves/<tag>/<game>, keyed the way guides,
+            // cheats and states already are, which is where the launcher and save sync both look.
             put("savefile_directory", saveDir.absolutePath)
             put("sort_savefiles_enable", "false")
             put("sort_savefiles_by_content_enable", "false")
+            put("save_file_compression", "false")
             put("state_slot", raSlot.toString())
             // Also in the base config; emitted in the plumbing band too so a tier or custom.cfg
             // cannot turn it off.
@@ -350,6 +364,16 @@ class LaunchManager(
         } catch (_: IOException) {
         }
     }
+
+    // Once a core reads either stick, RetroArch takes the left stick off the D-pad for the session,
+    // and on these platforms the core reads one it never steers with. ANALOG_DPAD_LSTICK_FORCED
+    // (3) keeps the stick on the D-pad and hands the core a centered left stick, on all 16 ports.
+    private fun stickDpadDefaults(tag: String): Map<String, String> =
+        if (platformConfig.forcesStickDpad(tag)) {
+            (1..16).associate { "input_player${it}_analog_dpad_mode" to "3" }
+        } else {
+            emptyMap()
+        }
 
     // Weakest to strongest: platform on this core, then this game on this core. Written out whole
     // every launch, so a key removed from a tier stops applying instead of lingering in the file
@@ -907,6 +931,11 @@ class LaunchManager(
             appendLine("sort_savestates_by_content_enable = \"true\"")
             appendLine("sort_savestates_enable = \"false\"")
             appendLine("savestate_file_compression = \"false\"")
+            // Saves too, and for a reason beyond consistency: a compressed .srm is an rzip
+            // container rather than SRAM, which another launcher restoring it writes to the save
+            // path verbatim and a desktop emulator will not read. The same save also hashes
+            // differently compressed and uncompressed, which is a sync anchor that never settles.
+            appendLine("save_file_compression = \"false\"")
             // RetroArch defaults this off everywhere but x86_64, and the slot thumbnails are the
             // whole point of the save and load rows.
             appendLine("savestate_thumbnail_enable = \"true\"")
@@ -920,6 +949,10 @@ class LaunchManager(
             // Cannoli composes the override tiers itself; RetroArch's own auto-override loading
             // would layer a second, uncontrolled copy on top of what was just composed.
             appendLine("auto_overrides_enable = \"false\"")
+            // Cannoli stores button remaps in its own tiers and writes them straight into
+            // RetroArch's remap array. A .rmp loading here would fight that, and the format also
+            // carries the controller type and the analog D-pad mode, which other features own.
+            appendLine("auto_remaps_enable = \"false\"")
             appendLine("video_font_enable = \"false\"")
             appendLine("assets_directory = \"$rootPath/Config/Assets\"")
             // RetroArch appends the joypad driver name to this, so it scans Autoconfig/android,

@@ -16,6 +16,10 @@ data class RaOptionStrings(
     val custom: String = "Custom",
     /** Cannoli's own screen inside the Input category, so not a curated row label. */
     val shortcuts: String = "Shortcuts",
+    val buttonMappings: String = "Button Mappings",
+    val controllerType: String = "Controller Type",
+    /** Formats a Controller Type row when several players have pads. The argument counts from one. */
+    val playerController: (Int) -> String = { "Player $it Controller" },
     val shaderApplied: String = "Applied",
     val shaderEnabled: String = "Shader",
     val shaderLoad: String = "Load Preset",
@@ -47,6 +51,9 @@ data class RaOptionStrings(
     val achievementsUnrecognised: String = "Inactive (Game not recognized)",
     val achievementsNone: String = "Inactive (No achievements)",
     val achievementsOffline: String = "Inactive (Could not reach server)",
+    /** Formats the achievements screen's status line when the set came from the offline cache. The
+     *  argument is the cache's relative age, such as "3 days ago". */
+    val achievementsOfflineCached: (String) -> String = { "Offline - cached $it" },
     val infoGameId: String = "RA Game ID",
     val infoHash: String = "RA Hash",
     val curatedCategoryTitles: Map<String, String> = mapOf(
