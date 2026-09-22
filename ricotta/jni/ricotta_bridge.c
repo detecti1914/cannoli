@@ -275,14 +275,47 @@ typedef struct
    int   port_a;
    int   port_b;
    int   remap_value;
+   int   ra_wait;
 } ricotta_cmd_entry;
 static ricotta_cmd_entry g_cmd_queue[RICOTTA_CMD_QUEUE_SIZE];
 static int g_cmd_head = 0;
 static int g_cmd_tail = 0;
 static pthread_mutex_t g_cmd_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+/* A caller that waits for its write to land, so the menu can show what RetroArch chose rather than
+ * what it was asked for. One at a time: the menu writes from a single thread and blocks on each. */
+static pthread_mutex_t g_apply_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  g_apply_cond  = PTHREAD_COND_INITIALIZER;
+/* Names the wait a queued write belongs to. A write that timed out is still in the queue and still
+ * answers when the runloop reaches it, and without this that answer would be handed to whoever is
+ * waiting by then, which is a different setting. */
+static int  g_apply_token   = 0;
+static int  g_apply_waiting = 0;
+static int  g_apply_done    = 0;
+static int  g_apply_found   = 0;
+static char g_apply_value[512];
+
+/* Hands the waiting caller the value the setting now holds, or nothing when there was none to
+ * read. Called on the runloop thread once the write and its change handlers are through. */
+static void ricotta_apply_finish(int token, const char *raw)
+{
+   if (!token)
+      return;
+   pthread_mutex_lock(&g_apply_mutex);
+   if (g_apply_waiting && !g_apply_done && token == g_apply_token)
+   {
+      if (raw)
+         strlcpy(g_apply_value, raw, sizeof(g_apply_value));
+      g_apply_found = raw ? 1 : 0;
+      g_apply_done  = 1;
+      pthread_cond_signal(&g_apply_cond);
+   }
+   pthread_mutex_unlock(&g_apply_mutex);
+}
+
 static void ricotta_enqueue_entry(ricotta_cmd_entry entry)
 {
+   int dropped = 0;
    pthread_mutex_lock(&g_cmd_mutex);
    {
       int next = (g_cmd_tail + 1) % RICOTTA_CMD_QUEUE_SIZE;
@@ -298,9 +331,13 @@ static void ricotta_enqueue_entry(ricotta_cmd_entry entry)
           * next entry. */
          free(entry.ra_key);
          free(entry.ra_value);
+         dropped = 1;
       }
    }
    pthread_mutex_unlock(&g_cmd_mutex);
+   /* A dropped write is answered rather than left to time out: the runloop will never reach it. */
+   if (dropped)
+      ricotta_apply_finish(entry.ra_wait, NULL);
 }
 
 static void ricotta_enqueue_command(int cmd, int slot, int has_slot)
@@ -469,7 +506,7 @@ static void ricotta_sb_escaped(ricotta_strbuf *sb, const char *s)
    }
 }
 
-static void ricotta_ra_apply(const char *key, const char *value);
+static void ricotta_ra_apply(const char *key, const char *value, int wait);
 static void ricotta_ra_save_override(int scope, const char *keys);
 static JNIEnv *ricotta_runloop_env(void);
 
@@ -693,7 +730,9 @@ void ricotta_bridge_poll_commands(void)
       if (entry.cmd == RICOTTA_QCMD_RA_SET)
       {
          if (entry.ra_key && entry.ra_value)
-            ricotta_ra_apply(entry.ra_key, entry.ra_value);
+            ricotta_ra_apply(entry.ra_key, entry.ra_value, entry.ra_wait);
+         else
+            ricotta_apply_finish(entry.ra_wait, NULL);
          free(entry.ra_key);
          free(entry.ra_value);
          continue;
@@ -1297,20 +1336,27 @@ Java_dev_cannoli_ricotta_EmbeddedRetroArchBridge_nativeCoreOptionKeys(
    return out;
 }
 
-static void ricotta_ra_apply(const char *key, const char *value)
+static void ricotta_ra_apply(const char *key, const char *value, int wait)
 {
    settings_t *settings;
    rarch_setting_t *s;
 
    if (!strncmp(key, RICOTTA_CORE_OPT_PREFIX, strlen(RICOTTA_CORE_OPT_PREFIX)))
    {
-      ricotta_core_opt_apply(key + strlen(RICOTTA_CORE_OPT_PREFIX), value);
+      const char *bare = key + strlen(RICOTTA_CORE_OPT_PREFIX);
+      ricotta_core_opt_apply(bare, value);
+      /* Core options have no echo of their own, and a caller waiting on one would sit through its
+       * whole timeout on every keypress. */
+      ricotta_apply_finish(wait, ricotta_core_opt_value(bare));
       return;
    }
 
    s = ricotta_ra_find(key);
    if (!s)
+   {
+      ricotta_apply_finish(wait, NULL);
       return;
+   }
    /* Every path below reaches the echo, including the ones that change nothing. A write RetroArch
     * refuses or clamps has to be reported, or the menu keeps showing the value it predicted and
     * only finds out it never took by being left and re-entered. */
@@ -1369,8 +1415,12 @@ echo:
    /* Confirm with the authoritative value; handlers may clamp or rewrite it. */
    {
       char buf[512];
+      char raw[512];
       if (s->actions->read)
          s->actions->read(s);
+      /* The waiter first: the echo below is an upcall onto a thread that may be the one waiting. */
+      ricotta_apply_finish(wait,
+            ricotta_ra_format_raw_value(s, raw, sizeof(raw)) ? raw : NULL);
       if (ricotta_ra_format_value(s, buf, sizeof(buf)))
       {
          JNIEnv *env = ricotta_runloop_env();
@@ -2567,6 +2617,55 @@ Java_dev_cannoli_ricotta_EmbeddedRetroArchBridge_nativeIsPaused(
    return (flags & RUNLOOP_FLAG_PAUSED) ? JNI_TRUE : JNI_FALSE;
 }
 
+/* What a setting holds right now, and nothing else: the machine value and the text RetroArch
+ * renders for it, tab separated.
+ *
+ * Describing a setting is what costs: building a combobox's labels walks its whole range, writing
+ * the live value once per candidate so RetroArch's own repr can render each one. That is fine once
+ * per key, and ruinous on every render of every row. None of it is needed to answer what the value
+ * is now, so this reads and never writes, which also means the runloop cannot sample a candidate
+ * value that was only ever meant to produce a label. */
+JNIEXPORT jstring JNICALL
+Java_dev_cannoli_ricotta_EmbeddedRetroArchBridge_nativeRaValue(
+      JNIEnv *env, jobject obj, jstring jkey)
+{
+   const char *key;
+   rarch_setting_t *s;
+   char raw[512];
+   char shown[512];
+   char joined[1040];
+
+   (void)obj;
+
+   key = (*env)->GetStringUTFChars(env, jkey, NULL);
+   if (!key)
+      return NULL;
+
+   if (!strncmp(key, RICOTTA_CORE_OPT_PREFIX, strlen(RICOTTA_CORE_OPT_PREFIX)))
+   {
+      const char *v = ricotta_core_opt_value(key + strlen(RICOTTA_CORE_OPT_PREFIX));
+      (*env)->ReleaseStringUTFChars(env, jkey, key);
+      if (!v)
+         return NULL;
+      /* A core option's machine value is its own label, the same as describe reports. */
+      snprintf(joined, sizeof(joined), "%s\x1f%s", v, v);
+      return (*env)->NewStringUTF(env, joined);
+   }
+
+   s = ricotta_ra_find(key);
+   (*env)->ReleaseStringUTFChars(env, jkey, key);
+   if (!s)
+      return NULL;
+   if (s->actions->read)
+      s->actions->read(s);
+   if (!ricotta_ra_format_raw_value(s, raw, sizeof(raw)))
+      return NULL;
+   if (!ricotta_ra_format_value(s, shown, sizeof(shown)))
+      strlcpy(shown, raw, sizeof(shown));
+   snprintf(joined, sizeof(joined), "%s\x1f%s", raw, shown);
+   return (*env)->NewStringUTF(env, joined);
+}
+
 JNIEXPORT jobjectArray JNICALL
 Java_dev_cannoli_ricotta_EmbeddedRetroArchBridge_nativeRaGetSetting(
       JNIEnv *env, jobject obj, jstring jkey)
@@ -2830,6 +2929,82 @@ Java_dev_cannoli_ricotta_EmbeddedRetroArchBridge_nativeRaSetSetting(
    return JNI_TRUE;
 }
 
+/* Writes and waits for the runloop to have written, answering with the value the setting holds
+ * afterwards. That value is the point: RetroArch clamps, refuses, and rewrites neighbours from
+ * change handlers, so a menu that renders what it asked for renders something that never happened.
+ *
+ * Returns null when the key resolves to nothing, when the queue was full, or when the timeout
+ * passed. A runloop that is not turning must not hang the menu, and nothing here can tell a stalled
+ * core from a slow one. */
+JNIEXPORT jstring JNICALL
+Java_dev_cannoli_ricotta_EmbeddedRetroArchBridge_nativeRaApply(
+      JNIEnv *env, jobject obj, jstring jkey, jstring jvalue, jint timeout_ms)
+{
+   ricotta_cmd_entry entry = {0};
+   const char *key   = (*env)->GetStringUTFChars(env, jkey, NULL);
+   const char *value = (*env)->GetStringUTFChars(env, jvalue, NULL);
+   size_t plen       = strlen(RICOTTA_CORE_OPT_PREFIX);
+   int known         = 0;
+   jstring out       = NULL;
+
+   (void)obj;
+
+   if (key)
+      known = !strncmp(key, RICOTTA_CORE_OPT_PREFIX, plen)
+            ? ricotta_core_opt_index(key + plen) >= 0
+            : ricotta_ra_find(key) != NULL;
+
+   if (!known)
+   {
+      if (key)
+         (*env)->ReleaseStringUTFChars(env, jkey, key);
+      if (value)
+         (*env)->ReleaseStringUTFChars(env, jvalue, value);
+      return NULL;
+   }
+
+   entry.cmd      = RICOTTA_QCMD_RA_SET;
+   entry.ra_key   = key ? strdup(key) : NULL;
+   entry.ra_value = value ? strdup(value) : NULL;
+
+   if (key)
+      (*env)->ReleaseStringUTFChars(env, jkey, key);
+   if (value)
+      (*env)->ReleaseStringUTFChars(env, jvalue, value);
+
+   pthread_mutex_lock(&g_apply_mutex);
+   entry.ra_wait     = ++g_apply_token;
+   g_apply_waiting   = 1;
+   g_apply_done      = 0;
+   g_apply_found     = 0;
+   g_apply_value[0]  = '\0';
+   pthread_mutex_unlock(&g_apply_mutex);
+
+   ricotta_enqueue_entry(entry);
+
+   pthread_mutex_lock(&g_apply_mutex);
+   {
+      struct timespec deadline;
+      clock_gettime(CLOCK_REALTIME, &deadline);
+      deadline.tv_sec  += timeout_ms / 1000;
+      deadline.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
+      if (deadline.tv_nsec >= 1000000000L)
+      {
+         deadline.tv_sec  += 1;
+         deadline.tv_nsec -= 1000000000L;
+      }
+      while (!g_apply_done)
+         if (pthread_cond_timedwait(&g_apply_cond, &g_apply_mutex, &deadline) != 0)
+            break;
+      if (g_apply_done && g_apply_found)
+         out = (*env)->NewStringUTF(env, g_apply_value);
+      g_apply_waiting = 0;
+   }
+   pthread_mutex_unlock(&g_apply_mutex);
+
+   return out;
+}
+
 JNIEXPORT jboolean JNICALL
 Java_dev_cannoli_ricotta_EmbeddedRetroArchBridge_nativeApplyViewport(
       JNIEnv *env, jobject obj, jint x, jint y, jint w, jint h)
@@ -3076,6 +3251,86 @@ Java_dev_cannoli_ricotta_EmbeddedRetroArchBridge_nativeCheatHardcoreActive(
 #else
    return JNI_FALSE;
 #endif
+}
+
+/* Achievement progress carried by a save state, held until the set it belongs to arrives.
+ *
+ * A state applied before the set has arrived is every resumed launch: the load is local and the
+ * set is a network round trip, so rc_client refuses the block and nothing revisits it, silently
+ * restarting whatever the save had accumulated. cheevos.c hands it here on the refusal and asks
+ * for it back once the game load finishes.
+ *
+ * Here rather than in cheevos.c so the lock can be a plain static mutex, the way everything else
+ * in this file is, and so the patch on the file upstream churns most is two calls instead of
+ * eighty lines. The state load that stashes and the game load that applies are different threads
+ * and either can free the buffer, so taking it has to be indivisible. */
+static uint8_t        *g_pending_progress      = NULL;
+static size_t          g_pending_progress_size = 0;
+static pthread_mutex_t g_progress_mutex        = PTHREAD_MUTEX_INITIALIZER;
+
+/* Caller holds g_progress_mutex. */
+static void ricotta_drop_progress_locked(void)
+{
+   free(g_pending_progress);
+   g_pending_progress      = NULL;
+   g_pending_progress_size = 0;
+}
+
+void ricotta_cheevos_forget_progress(void)
+{
+   pthread_mutex_lock(&g_progress_mutex);
+   ricotta_drop_progress_locked();
+   pthread_mutex_unlock(&g_progress_mutex);
+}
+
+void ricotta_cheevos_stash_progress(const void *buffer, size_t size)
+{
+   /* cheevos.c asks rc_client the same question through a static wrapper of its own. Asked
+    * directly here so this does not need a function that file keeps to itself. */
+   rcheevos_locals_t *locals = get_rcheevos_locals();
+   const int game_loaded     = locals && rc_client_is_game_loaded(locals->client);
+   uint8_t *copy             = NULL;
+
+   /* Refused with a game already loaded is a real deserialize failure rather than an ordering
+    * problem, and holding that for later would answer a question nobody asked. */
+   if (!game_loaded && buffer && size > 0)
+   {
+      /* Copied outside the lock: a savestate block's malloc and memcpy have no business running
+       * with the apply side waiting behind them. */
+      if ((copy = (uint8_t*)malloc(size)))
+         memcpy(copy, buffer, size);
+   }
+
+   pthread_mutex_lock(&g_progress_mutex);
+   ricotta_drop_progress_locked();
+   g_pending_progress      = copy;
+   g_pending_progress_size = copy ? size : 0;
+   pthread_mutex_unlock(&g_progress_mutex);
+}
+
+void ricotta_cheevos_apply_pending_progress(void)
+{
+   rcheevos_locals_t *locals;
+   uint8_t           *progress;
+   size_t             size;
+
+   /* Taken under the lock, so exactly one caller leaves holding the buffer and owns freeing it. */
+   pthread_mutex_lock(&g_progress_mutex);
+   progress                = g_pending_progress;
+   size                    = g_pending_progress_size;
+   g_pending_progress      = NULL;
+   g_pending_progress_size = 0;
+   pthread_mutex_unlock(&g_progress_mutex);
+
+   if (!progress)
+      return;
+
+   /* Softcore only. Hardcore's relationship with save states is RetroArch's own. */
+   locals = get_rcheevos_locals();
+   if (locals && locals->client && !rcheevos_hardcore_active())
+      rc_client_deserialize_progress_sized(locals->client, progress, size);
+
+   free(progress);
 }
 
 /* Called from RetroArch source sites (HAVE_RICOTTA_OSD) when Cannoli owns an

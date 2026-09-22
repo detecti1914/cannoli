@@ -22,31 +22,52 @@ PATCH_DIR="$ROOT_DIR/patches"
 
 cd "$RA_DIR"
 
-# name:paths. configuration.c and .h are one patch because the struct and its accessor move
-# together; nothing else shares a file with anything else.
+# name:paths. One file per patch, so a conflict at a bump is scoped to one file.
 #
 # retroactivity_common was retired at the 9770234364 bump: it guarded registerReceiver behind an
 # SDK check because upstream did not, which crashed on Android 14. Upstream now does it itself.
+# configuration and ra_settings_strings were retired for being dead: the first added an override
+# path helper nothing called, the second eleven strings nothing referenced.
 ROSTER="
 android_input:input/drivers/android_input.c
 cheat_manager:cheat_manager.c
 cheevos:cheevos/cheevos.c
 cheevos_client:cheevos/cheevos_client.c
 command:command.c
-configuration:configuration.c configuration.h
 disk_control_interface:disk_control_interface.c
 gfx_widgets:gfx/gfx_widgets.c
 gl2:gfx/drivers/gl2.c
 netplay_frontend:network/netplay/netplay_frontend.c
 retroarch:retroarch.c
+runloop:runloop.c
 task_autodetect:tasks/task_autodetect.c
 task_save:tasks/task_save.c
 task_screenshot:tasks/task_screenshot.c
+video_driver:gfx/video_driver.c
 "
 
-# The strings file is created by its patch rather than modified, so it needs an intent-to-add for
-# the `new file mode` header to survive.
-NEW_FILE="pkg/android/phoenix/res/values/strings_cannoli.xml"
+# Every file that differs from upstream has to be claimed by an entry above, or its edits are
+# dropped silently the next time this runs and nobody is told. Derived from the tree rather than
+# trusted, because the roster is written by hand and has been wrong twice: cheevos_client.c once,
+# then runloop.c and gfx/video_driver.c, the first of which carries the command pump the whole
+# in-game menu writes through.
+claimed="$(mktemp)"
+trap 'rm -f "$claimed"' EXIT
+{
+    printf '%s\n' "$ROSTER" | sed -n 's/^[^:]*://p' | tr ' ' '\n'
+    # Managed by apply-patches.sh rather than by a patch: edited in place, deleted, and created.
+    echo "pkg/android/phoenix-common/jni/Android.mk"
+    echo "pkg/android/phoenix/src/com/retroarch/browser/retroactivity/RetroActivityFuture.java"
+} | sed '/^$/d' | sort -u > "$claimed"
+
+unclaimed="$(git diff --name-only HEAD | grep -vxFf "$claimed" || true)"
+if [ -n "$unclaimed" ]; then
+    echo "No ROSTER entry claims these changed files:" >&2
+    echo "$unclaimed" | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "Their changes would be dropped. Add them to ROSTER and run this again." >&2
+    exit 1
+fi
 
 written=0
 # Iterate lines, not words: an entry can name more than one path.
@@ -66,13 +87,5 @@ while IFS= read -r entry; do
     written=$((written + 1))
 done <<< "$ROSTER"
 
-if [ -f "$NEW_FILE" ]; then
-    chmod u+w "$NEW_FILE"
-    git add -N "$NEW_FILE"
-    git diff HEAD -- "$NEW_FILE" > "$PATCH_DIR/ra_settings_strings.patch"
-    git reset -q -- "$NEW_FILE"
-    echo "  wrote ra_settings_strings.patch"
-    written=$((written + 1))
-fi
 
 echo "Regenerated $written patches."

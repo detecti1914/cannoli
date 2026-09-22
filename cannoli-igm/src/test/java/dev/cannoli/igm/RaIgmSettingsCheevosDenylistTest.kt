@@ -19,9 +19,9 @@ private class DenylistHost(private val keys: List<String>) : RaSettingsHost {
     override fun raGetSetting(key: String): RaSetting? =
         if (key in keys) RaSetting(key, key, RaSettingType.ENUM, MachineValue("off"), "off", options = listOf(RaOption(MachineValue("off"), "off"), RaOption(MachineValue("on"), "on"))) else null
 
-    override fun raSetSetting(key: String, value: MachineValue) = true
+    override fun raApply(key: String, value: MachineValue, watch: Collection<String>) =
+        if (key in keys) RaApplyResult(value) else null
     override fun raSaveOverride(scope: RaOverrideScope, keys: Set<String>) { savedKeys.add(keys) }
-    override fun setOnRaSettingApplied(callback: (String, String) -> Unit) {}
 }
 
 class RaIgmSettingsCheevosDenylistTest {

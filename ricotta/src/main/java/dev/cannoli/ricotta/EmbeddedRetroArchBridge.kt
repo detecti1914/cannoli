@@ -12,12 +12,16 @@ import dev.cannoli.core.shader.ShaderEntry
 import dev.cannoli.core.shader.ShaderIndex
 import dev.cannoli.core.shader.ShaderPreset
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import dev.cannoli.igm.AchievementInfo
 import dev.cannoli.igm.ButtonRemap
 import dev.cannoli.igm.RemapButton
 import dev.cannoli.igm.RetroArchBridge
 import dev.cannoli.igm.RaOverrideScope
 import dev.cannoli.igm.MachineValue
+import dev.cannoli.igm.RaApplyResult
 import dev.cannoli.igm.RaOption
 import dev.cannoli.igm.RaSetting
 import dev.cannoli.igm.RaSettingType
@@ -46,6 +50,7 @@ class EmbeddedRetroArchBridge(
         // keyed by these. Set before the IGM is interactive so no save can precede it.
         nativeSetCannoliContext(cannoliRoot, platformTag, romBaseName, coreId)
         applyStoredShader()
+        watchForRunloop()
     }
 
     fun destroy() {
@@ -92,11 +97,42 @@ class EmbeddedRetroArchBridge(
 
     @Suppress("unused")
     fun onRunloopReady() {
+        runloopReached = true
         mainHandler.post {
             applyStoredPortDevices(afterReset = false)
             applyRemap(storedRemap())
             onRunloopReady?.invoke()
         }
+    }
+
+    @Volatile
+    private var runloopReached = false
+
+    /**
+     * Says so on the card if RetroArch's loop never reports in.
+     *
+     * This arrives from the command pump, which RetroArch calls once per iteration through
+     * runloop.patch. Lose that patch and nothing fails loudly: the pump is still compiled, simply
+     * never called, so the build runs, the game plays, and every write the in-game menu makes
+     * waits out its timeout against a queue nobody drains. The patch roster has dropped a file
+     * before, so the one signal that would catch it is worth writing down.
+     *
+     * A core that never finishes loading looks the same from here, which is also worth knowing.
+     */
+    private fun watchForRunloop() {
+        if (cannoliRoot.isEmpty()) return
+        mainHandler.postDelayed({
+            if (runloopReached) return@postDelayed
+            runCatching {
+                val out = File(cannoliRoot, "Logs/runloop.log")
+                out.parentFile?.mkdirs()
+                out.appendText(
+                    "${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())} " +
+                        "no runloop after ${RUNLOOP_GRACE_MS}ms: the command pump never ran, so " +
+                        "nothing the menu writes can apply. Check runloop.patch is applied.\n"
+                )
+            }
+        }, RUNLOOP_GRACE_MS)
     }
 
     /** A key belonging to some shortcut chord went down or up during play. */
@@ -603,7 +639,31 @@ class EmbeddedRetroArchBridge(
         return names
     }
 
+    /**
+     * What a setting is, as opposed to what it holds.
+     *
+     * Kept because building one is the expensive half: a combobox's labels come from walking its
+     * whole range and asking RetroArch to render each candidate. What it holds is then a cheap
+     * read, so a screen can be re-read on every render instead of remembered.
+     *
+     * Thrown away whenever a value lands, because RetroArch decides some ranges from other
+     * settings: black frame insertion's maximum follows the refresh rate. Writes happen on a
+     * keypress and reads happen on every render, so paying for a rebuild per write is the right
+     * way round.
+     */
+    private val described = java.util.concurrent.ConcurrentHashMap<String, RaSetting>()
+
     override fun raGetSetting(key: String): RaSetting? {
+        val shape = described[key] ?: describe(key)?.also { described[key] = it } ?: return null
+        val now = nativeRaValue(key)?.split('') ?: return null
+        val machine = now.firstOrNull() ?: return null
+        return shape.copy(
+            machineValue = MachineValue(machine),
+            displayValue = now.getOrNull(1)?.takeIf { it.isNotEmpty() } ?: machine,
+        )
+    }
+
+    private fun describe(key: String): RaSetting? {
         val fields = nativeRaGetSetting(key)?.asFields() ?: return null
         val machine = fields["machine"] ?: return null
         val type = when (fields["type"]) {
@@ -643,9 +703,36 @@ class EmbeddedRetroArchBridge(
     }
 
     // False means the key resolves to nothing, so the write was never queued. The apply itself is
-    // asynchronous and its outcome arrives later through the applied echo.
-    override fun raSetSetting(key: String, value: MachineValue): Boolean =
+    // asynchronous: this is the bridge's own fire-and-forget write, for the handful of settings it
+    // owns rather than shows. Anything the menu writes goes through raApply and waits.
+    private fun raSetSetting(key: String, value: MachineValue): Boolean =
         nativeRaSetSetting(key, value.raw)
+
+    /**
+     * Serialises the waits: the native holds one result slot, and a second caller landing in it
+     * while the first is parked would hand one of them the other's answer.
+     */
+    private val applyLock = Any()
+
+    /**
+     * The moved set is worked out here rather than in the native, by reading the watched keys on
+     * both sides of the apply. That is only affordable because a value read is now cheap, and it
+     * keeps a list of keys out of the command queue for an answer two loops over a map can give.
+     */
+    override fun raApply(
+        key: String,
+        value: MachineValue,
+        watch: Collection<String>,
+    ): RaApplyResult? {
+        val before = watch.filterNot { it == key }.associateWith { rawValue(it) }
+        val applied = synchronized(applyLock) { nativeRaApply(key, value.raw, APPLY_TIMEOUT_MS) }
+        described.clear()
+        if (applied == null) return null
+        val moved = before.keys.filterTo(mutableSetOf()) { rawValue(it) != before[it] }
+        return RaApplyResult(MachineValue(applied), moved)
+    }
+
+    private fun rawValue(key: String): String? = nativeRaValue(key)?.substringBefore('')
 
     override fun coreGeometry(): IntArray? = nativeCoreGeometry()
 
@@ -667,8 +754,11 @@ class EmbeddedRetroArchBridge(
     override fun raScreenRows(label: String): List<RaScreenRow> =
         nativeRaScreenRows(label).orEmpty().mapNotNull { encoded ->
             val f = encoded.split('\u001f')
-            if (f.size < 3 || f[0].isEmpty()) null
-            else RaScreenRow(key = f[0], label = f[1], isMenu = f[2] == "1")
+            // Trimmed because a key is an identity and RetroArch does not always treat it as one:
+            // it builds the audio mixer rows as "audio_mixer_stream_%d\n" (menu_displaylist.c),
+            // and a key carrying whitespace matches nothing for the rest of its life.
+            if (f.size < 3 || f[0].isBlank()) null
+            else RaScreenRow(key = f[0].trim(), label = f[1].trim(), isMenu = f[2] == "1")
         }
 
     // Spelled out rather than taken from the enum ordinal, so reordering the enum cannot silently
@@ -1093,30 +1183,25 @@ class EmbeddedRetroArchBridge(
         nativeRaSaveOverride(encoded, encodeOverrideKeys(keys))
     }
 
-    private var onRaAppliedCallback: ((String, String) -> Unit)? = null
-
-    override fun setOnRaSettingApplied(callback: (key: String, value: String) -> Unit) {
-        onRaAppliedCallback = callback
-    }
-
     /**
-     * A second listener for the same echo, owned by this process rather than by the in-game menu.
-     * setOnRaSettingApplied is a single slot the IGM's settings provider claims, and the viewport
-     * needs the same signal for a different reason, so it gets its own rather than the two
-     * contending for one.
+     * Told that a setting changed, with RetroArch's display text for it.
+     *
+     * One listener, and the viewport controller is it. The menu used to claim the same slot to
+     * learn when its own writes landed, which made correctness a question of who registered last;
+     * it waits on [raApply] instead and no longer listens at all.
      */
-    private var onRaAppliedLocal: ((String, String) -> Unit)? = null
+    private var onRaApplied: ((String, String) -> Unit)? = null
 
-    fun setOnRaSettingAppliedLocal(callback: ((key: String, value: String) -> Unit)?) {
-        onRaAppliedLocal = callback
+    fun setOnRaSettingApplied(callback: ((key: String, value: String) -> Unit)?) {
+        onRaApplied = callback
     }
 
     @Suppress("unused")
     fun onRaSettingApplied(key: String, value: String) {
-        mainHandler.post {
-            onRaAppliedCallback?.invoke(key, value)
-            onRaAppliedLocal?.invoke(key, value)
-        }
+        // Anything that writes reaches here, including the viewport controller's own writes, so
+        // this is where a description built against the old value stops being trusted.
+        described.clear()
+        mainHandler.post { onRaApplied?.invoke(key, value) }
     }
 
     private var onCheatsLoadedCallback: ((List<RetroArchBridge.CheatRow>) -> Unit)? = null
@@ -1187,7 +1272,9 @@ class EmbeddedRetroArchBridge(
     private external fun nativeCheatApply()
     private external fun nativeCheatHardcoreActive(): Boolean
     private external fun nativeRaGetSetting(key: String): Array<String>?
+    private external fun nativeRaValue(key: String): String?
     private external fun nativeRaSetSetting(key: String, value: String): Boolean
+    private external fun nativeRaApply(key: String, value: String, timeoutMs: Int): String?
     private external fun nativeSetShaderPreset(path: String)
 
     private external fun nativeRaSaveOverride(scope: Int, keys: String)
@@ -1207,6 +1294,22 @@ class EmbeddedRetroArchBridge(
          * offer the working copy of the thing you are currently editing as something to load.
          */
         private const val WORKING_CHAIN = ".cannoli_chain"
+
+        /**
+         * How long a write waits for the runloop before the menu carries on without it.
+         *
+         * A write lands on the next runloop iteration, so the wait is normally under a frame. The
+         * budget is long enough to cover a change handler that reinitialises a driver and short
+         * enough that a core which has stopped turning does not read as a frozen menu.
+         */
+        private const val APPLY_TIMEOUT_MS = 500
+
+        /**
+         * How long RetroArch gets to reach its loop before that is worth writing down. Long
+         * enough for a slow core on a cold card, short enough to still be in the log when
+         * somebody goes looking for why the menu does nothing.
+         */
+        private const val RUNLOOP_GRACE_MS = 20_000L
 
         const val KEY_OVERLAY = OverrideTiers.KEY_OVERLAY
         const val KEY_SHADER = OverrideTiers.KEY_SHADER
