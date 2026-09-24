@@ -85,6 +85,7 @@ class InputRouter @Inject constructor(
         saveSlotsHandler.onBackToContextMenu = { dialogHandler.openRommSavesMenu(MENU_SAVE_SLOTS) }
         dialogHandler.openGuides = guideHandler::startGuides
         dialogHandler.onRetroAchievementsLogout = ::logOutRetroAchievements
+        dialogHandler.onControllerReset = controllerDetailHandler::resetConfirmed
 
         // Launcher overrides onSelectUp because the select-hold cancel + nav-flag reset is
         // specific to launcher state; the generic helper cannot know about it.
@@ -267,8 +268,6 @@ class InputRouter @Inject constructor(
         return scrollable<LauncherScreen.RetroAchievements>(
             onConfirm = {
                 when (dev.cannoli.scorza.ui.components.RaAccountRow.entries.getOrNull(selectedIndex)) {
-                    dev.cannoli.scorza.ui.components.RaAccountRow.ACCOUNT ->
-                        nav.dialogState.value = DialogState.RetroAchievementsLogoutConfirm
                     dev.cannoli.scorza.ui.components.RaAccountRow.HARDCORE -> toggleHardcore()
                     dev.cannoli.scorza.ui.components.RaAccountRow.OFFLINE_SETS -> {
                         val platforms = raOfflineStore().entries()
@@ -281,6 +280,7 @@ class InputRouter @Inject constructor(
                 }
             },
             onBack = { leaveRetroAchievements() },
+            onWest = { nav.dialogState.value = DialogState.RetroAchievementsLogoutConfirm },
             onLeft = toggleHardcore,
             onRight = toggleHardcore,
         )

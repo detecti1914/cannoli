@@ -123,6 +123,7 @@ class RetroActivityFuture : RetroActivityCamera() {
             val bridge = EmbeddedRetroArchBridge(
                 params?.hardcoreInEffect ?: false, cannoliRoot, platformTag, romBaseName,
                 params?.coreId ?: "",
+                ds?.buttonLabelSet ?: dev.cannoli.ui.ButtonLabelSet.PLUMBER,
             )
             raBridge = bridge
             viewportController = ViewportController(
@@ -166,7 +167,6 @@ class RetroActivityFuture : RetroActivityCamera() {
                 if (key == KEY_STATISTICS_SHOW) bridge.syncShowDebug()
             }
             params?.let { bridge.setIgmTriggerKeycodes(it.igmTriggerKeycodes.toIntArray()) }
-            params?.let { bridge.setBuiltinPorts(it.builtinPorts.toIntArray()) }
             params?.let { wireShortcuts(bridge, it.shortcuts, it.igmTriggerKeycodes.toSet()) }
             bridge.curatedSettings = params?.curatedSettings ?: true
             igmOverlay?.controller?.setInputMapping(params?.inputMapping)
@@ -376,7 +376,7 @@ class RetroActivityFuture : RetroActivityCamera() {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         startActivity(restartIntent)
-        System.exit(0)
+        EmbeddedRetroArchBridge.nativeExitProcess()
     }
 
     override fun onResume() {
@@ -415,12 +415,13 @@ class RetroActivityFuture : RetroActivityCamera() {
         //
         // Quitting from the in-game menu does not depend on this: it enqueues CMD_EVENT_QUIT and
         // RetroArch exits on its own.
-        if (quitfocus && isFinishing) System.exit(0)
+        if (quitfocus && isFinishing) EmbeddedRetroArchBridge.nativeExitProcess()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        sendUiMessage(HANDLER_WHAT_TOGGLE_IMMERSIVE, hasFocus)
+        // Focus lost to the IGM panel must not drop immersive, or the nav bar flashes.
+        if (hasFocus) sendUiMessage(HANDLER_WHAT_TOGGLE_IMMERSIVE, true)
 
         if (autoMouseGrab) inputGrabMouse(hasFocus)
     }
@@ -541,8 +542,6 @@ class RetroActivityFuture : RetroActivityCamera() {
             RicottaOsdEvent.UNDO_SAVE_STATE -> osdContext.getString(R.string.osd_event_save_undone)
             RicottaOsdEvent.DISK_CHANGED -> osdContext.getString(R.string.igm_disc_number, slot + 1)
             RicottaOsdEvent.SCREENSHOT -> osdContext.getString(R.string.osd_event_screenshot)
-            RicottaOsdEvent.CONTROLLER_PORT ->
-                osdContext.getString(R.string.osd_event_controller_port, slot)
             RicottaOsdEvent.LOAD_REFUSED ->
                 osdContext.getString(R.string.osd_event_hardcore_load_blocked)
             RicottaOsdEvent.HARDCORE_PAUSED ->

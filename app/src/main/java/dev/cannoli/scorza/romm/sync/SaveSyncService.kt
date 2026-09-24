@@ -514,7 +514,7 @@ class SaveSyncService(
     private fun verifyDownloaded(tmp: File, expectedHash: String?) {
         if (tmp.length() == 0L) throw IllegalStateException("empty download")
         if (expectedHash != null && expectedHash.length == 32) {
-            val actual = SaveHasher.hashFile(tmp)
+            val actual = if (SaveHasher.isZip(tmp)) SaveHasher.hashZipContents(tmp) else SaveHasher.hashFile(tmp)
             if (!actual.equals(expectedHash, ignoreCase = true)) {
                 throw IllegalStateException("hash mismatch (expected $expectedHash, got $actual)")
             }
@@ -545,6 +545,7 @@ class SaveSyncService(
                 romId, emulator, slot, deviceId, overwrite, file, sessionId,
                 // Only the bucket that rewrites itself. A named slot the user made is never pruned.
                 pruneHistory = slot == DEFAULT_SLOT,
+                fileName = local.uploadFileName,
             )
         } finally {
             if (local.isBundle) file.delete()

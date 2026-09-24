@@ -22,8 +22,13 @@ fun testController(
 const val NO_SAVES = "/nonexistent/cannoli-test/Game.state"
 
 open class FakeRetroArchBridge : RetroArchBridge {
+    /** Records the order [quit] and [dropHeldCommands] land relative to each other and to
+     * [IGMController.onClose], which the test wires into the same list. */
+    val callOrder = mutableListOf<String>()
+
     override fun reset() {}
-    override fun quit() {}
+    override fun quit() { callOrder += "quit" }
+    override fun dropHeldCommands() { callOrder += "dropHeldCommands" }
 
     var savedSlots = mutableListOf<Int>()
     var loadedSlots = mutableListOf<Int>()
@@ -58,6 +63,18 @@ open class FakeRetroArchBridge : RetroArchBridge {
         remap[button.id] = target
         remapSets += button.id to target
     }
+
+    var remapBase: Map<Int, Int> = ButtonRemap.identity()
+    var remapResets = 0
+
+    override fun buttonRemapBase(): Map<Int, Int> = remapBase
+    override fun resetButtonRemap() {
+        remap.clear()
+        remapResets++
+    }
+
+    var descriptors: Map<Int, String> = emptyMap()
+    override fun buttonDescriptors(): Map<Int, String> = descriptors
 
     var nativeMenuOpened = 0
     private var menuClosedCallback: (() -> Unit)? = null

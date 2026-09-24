@@ -12,6 +12,9 @@ interface RetroArchBridge {
     fun reset()
     fun quit()
 
+    /** Drops whatever a menu write is holding, unrun, rather than running it as the game resumes. */
+    fun dropHeldCommands() {}
+
     /** Queues a write of the slot. It has not happened when this returns. */
     fun saveState(slot: Int)
     fun loadState(slot: Int)
@@ -91,6 +94,14 @@ interface RetroArchBridge {
 
     /** Stages [button] sending [target], or [ButtonRemap.UNBOUND], and applies it to the game. */
     fun setButtonRemap(button: RemapButton, target: Int) {}
+
+    /** What an unset button falls back to, in place of sending itself. Identity when there is none. */
+    fun buttonRemapBase(): Map<Int, Int> = ButtonRemap.identity()
+
+    /** Drops every saved button mapping, returning the pad to [buttonRemapBase]. */
+    fun resetButtonRemap() {}
+
+    fun buttonDescriptors(): Map<Int, String> = emptyMap()
 
     /** RetroArch writes the auto slot itself while shutting down when this is on. */
     val savesOnQuit: Boolean

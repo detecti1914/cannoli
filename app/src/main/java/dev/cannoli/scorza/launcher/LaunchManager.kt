@@ -47,7 +47,6 @@ class LaunchManager(
     private val delfinoLauncher: DelfinoLauncher,
     private val launchState: LaunchState,
     private val activeMappingHolder: dev.cannoli.scorza.input.runtime.ActiveMappingHolder,
-    private val portRouter: dev.cannoli.scorza.input.runtime.PortRouter,
     private val installedCoreService: InstalledCoreService? = null,
     private val gameOverrides: dev.cannoli.scorza.db.GameOverrideStore? = null,
     private val globalOverrides: dev.cannoli.scorza.settings.GlobalOverridesManager? = null,
@@ -375,18 +374,21 @@ class LaunchManager(
             emptyMap()
         }
 
-    // Weakest to strongest: platform on this core, then this game on this core. Written out whole
-    // every launch, so a key removed from a tier stops applying instead of lingering in the file
-    // RetroArch flushed last time.
+    // Weakest to strongest: what Cannoli ships for this pad, then platform on this core, then this game
+    // on this core. Written out whole every launch, so a key removed from a tier stops applying instead
+    // of lingering in the file RetroArch flushed last time.
     private fun composeCoreOptions(
         paths: CannoliPaths,
         tag: String,
         romName: String,
         core: String,
     ): String {
-        val merged = LinkedHashMap<String, String>()
-        merged.putAll(readOverrideLayer(paths.systemOverrideOpt(tag, core)))
-        merged.putAll(readOverrideLayer(paths.gameOverrideOpt(tag, romName, core)))
+        val merged = ShippedCoreOptions.compose(
+            core = core,
+            glyphStyle = activeMappingHolder.active.value?.glyphStyle,
+            platform = readOverrideLayer(paths.systemOverrideOpt(tag, core)),
+            game = readOverrideLayer(paths.gameOverrideOpt(tag, romName, core)),
+        )
         val target = paths.coreOptionsLaunchOpt
         try {
             target.parentFile?.mkdirs()
@@ -785,7 +787,6 @@ class LaunchManager(
             dev.cannoli.scorza.settings.TimeFormat.TWENTY_FOUR_HOUR -> TimeFormatMode.TWENTY_FOUR_HOUR
         }
         return RicottaIgm(
-            builtinPorts = builtinPorts(),
             // Dropped here rather than in the emulator process: an action bound to nothing is one
             // the matcher can never match, and carrying it only widens the key set native watches.
             shortcuts = globalOverrides?.readShortcuts()?.filterValues { it.isNotEmpty() }.orEmpty(),
@@ -828,15 +829,6 @@ class LaunchManager(
     // Keycodes bound to BTN_MENU in the active mapping open the Cannoli IGM in ricotta,
     // mirroring how the launcher's own in-game menu opens. Falls back to the platform
     // default (BACK + BUTTON_MODE) when no mapping is active.
-    // A launch-time snapshot, which is the whole of it: a built-in pad is by definition present
-    // before the game starts, so anything arriving later is a real connection worth announcing.
-    private fun builtinPorts(): List<Int> =
-        portRouter.snapshotEntries()
-            .filter { it.mapping.match.builtin ?: it.device.isBuiltIn }
-            .mapNotNull { it.port }
-            .distinct()
-            .sorted()
-
     private fun resolveMenuKeycodes(): List<Int> =
         activeMappingHolder.active.value
             ?.bindings

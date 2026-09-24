@@ -477,6 +477,8 @@ class IGMOverlay(
     private fun showOverlayLayer() {
         if (showing) return
         composeView?.let { v ->
+            // A GONE panel stalls the launch transition 5s on Android 14.
+            if (!attached && controller.overlayPicker.activeImage.value == null) return@let
             if (!attachIfNeeded(v, focusable = false)) return@let
             v.visibility = if (controller.overlayPicker.activeImage.value != null) View.VISIBLE else View.GONE
         }
@@ -588,6 +590,8 @@ class IGMOverlay(
                         ?.let { controller.shortcutRows.value }.orEmpty(),
                     remapRows = (controller.currentScreen as? dev.cannoli.igm.IGMScreen.ButtonMappings)
                         ?.let { controller.remapRows.value }.orEmpty(),
+                    remapBase = controller.remapBase.value,
+                    remapNames = controller.remapNames.value,
                     players = controller.players.value,
                     previewTitle = controller.overlayPicker.title.value,
                     previewItems = controller.overlayPicker.items.value,

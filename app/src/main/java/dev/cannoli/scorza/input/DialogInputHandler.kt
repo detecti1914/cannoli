@@ -193,6 +193,7 @@ class DialogInputHandler @Inject constructor(
     // The RetroAchievements screen owns the credential-clearing and its own pop, so the confirm
     // dialog delegates back to it rather than duplicating that navigation here.
     var onRetroAchievementsLogout: (() -> Unit)? = null
+    var onControllerReset: ((String) -> Unit)? = null
 
     internal val gameContextOptions = listOf(MENU_MANAGE_COLLECTIONS, MENU_EMULATOR_OVERRIDE, MENU_ACHIEVEMENTS, MENU_RENAME, MENU_DELETE_GAME)
 
@@ -353,6 +354,9 @@ class DialogInputHandler @Inject constructor(
     /** Set by MainActivity, which owns the wizard controller. Reopens setup for a device. */
     var onRestartControllerWizard: ((Int) -> Unit)? = null
 
+    /** Set by MainActivity, which owns the sync scheduler. */
+    var onSyncSavesNow: (() -> Unit)? = null
+
     override fun onNorth(): Boolean {
         val ds = nav.dialogState.value
         if (ds == DialogState.None) {
@@ -363,6 +367,11 @@ class DialogInputHandler @Inject constructor(
             return false
         }
         when (ds) {
+            // Gated on the Sync History row so the legend and the row agree on whether sync exists.
+            is DialogState.QuickMenu -> if (dev.cannoli.scorza.ui.quickmenu.QuickMenuRow.SYNC_HISTORY in ds.rows) {
+                nav.dialogState.value = DialogState.None
+                onSyncSavesNow?.invoke()
+            }
             // Skip: the mapping stands, the check is declined, and the flow is finished.
             is DialogState.InputTesterOffer -> nav.dialogState.value = DialogState.None
             // Only where the selected row declared it clears, so the button does what the legend

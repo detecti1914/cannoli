@@ -164,7 +164,8 @@
     <string name="controllers_glyph_style">Glyph Style</string>
     <!-- Controller toggle: ignore this controller during gameplay (e.g. a media remote). -->
     <string name="controllers_exclude_from_gameplay">Exclude From Gameplay</string>
-    <string name="controllers_reset_defaults">Reset Defaults</string>
+    <!-- Confirmation before a controller mapping is reset: every edit to it is lost -->
+    <string name="controllers_reset_confirm">Reset this controller to its defaults?</string>
     <!-- Shown when a button has no assigned binding. -->
     <string name="controllers_not_bound">Not bound</string>
 
@@ -201,6 +202,8 @@
     <string name="glyph_plumber_east" translatable="false">A</string>
     <string name="glyph_plumber_west" translatable="false">Y</string>
     <string name="glyph_plumber_north" translatable="false">X</string>
+    <string name="glyph_hedgehog_c" translatable="false">C</string>
+    <string name="glyph_hedgehog_z" translatable="false">Z</string>
     <string name="glyph_redmond_south" translatable="false">A</string>
     <string name="glyph_redmond_east" translatable="false">B</string>
     <string name="glyph_redmond_west" translatable="false">X</string>
@@ -675,6 +678,7 @@
     <string name="glyph_style_redmond" translatable="false">Xbox</string>
     <string name="glyph_style_plumber" translatable="false">Nintendo</string>
     <string name="glyph_style_shapes" translatable="false">PlayStation</string>
+    <string name="glyph_style_hedgehog_6" translatable="false">Sega 6-Button</string>
     <string name="controller_wizard_skip">Press Start to skip a button your controller does not have</string>
 
     <!-- Boot error screen -->
@@ -797,8 +801,6 @@
     <string name="osd_event_save_undone">Save Undone</string>
     <!-- OSD pill confirming a screenshot was written to disk. -->
     <string name="osd_event_screenshot">Screenshot Saved</string>
-    <!-- OSD pill naming which player port a controller took. %1$d = player number, counting from 1. -->
-    <string name="osd_event_controller_port">Controller P%1$d</string>
     <!-- OSD pill: hardcore achievements refused a save state load. Hardcore is the RetroAchievements mode that bans save states. -->
     <string name="osd_event_hardcore_load_blocked">Hardcore: Load Blocked</string>
     <!-- OSD pill: hardcore achievements switched off for the rest of this session. -->
@@ -1129,6 +1131,8 @@
     <string name="label_refresh">REFRESH</string>
     <!-- Footer action on the offline sets screen: send queued unlocks to RetroAchievements now -->
     <string name="label_sync_now">SYNC NOW</string>
+    <!-- Footer action on the launcher quick menu: sync every game's saves with RomM now -->
+    <string name="label_sync_saves">SYNC SAVES</string>
 
     <!-- Save Slots screen -->
     <!-- Screen title. %1$s = game name. -->
