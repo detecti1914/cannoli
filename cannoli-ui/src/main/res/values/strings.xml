@@ -261,6 +261,8 @@
     <!-- Library setting naming the platform the launcher opens on, instead of the list of systems. -->
     <string name="setting_start_on">Starting Screen</string>
     <string name="setting_show_recently_played">Recently Played</string>
+    <!-- Five Game Handheld setting: shows or hides the Ports and Tools folders after the collection's games. -->
+    <string name="setting_fgh_show_ports_and_tools">Ports and Tools</string>
     <!-- Opens the Tools manager (sideloaded utility apps). -->
     <string name="setting_manage_tools">Manage Tools</string>
     <!-- Opens the Ports manager. "Ports" means standalone native game ports. -->
@@ -422,6 +424,8 @@
     <string name="romm_detail_on_device">On Device</string>
     <string name="romm_detail_not_on_device">Not on device</string>
     <string name="romm_version_picker_title">Download which version?</string>
+    <!-- Marks a version picker row as a ROM hack (a fan-modified game) rather than an official release. -->
+    <string name="romm_version_hack">Hack</string>
     <!-- Bottom-bar button opening the game's instruction manual (a document), not "manual/by hand". -->
     <string name="label_manual">MANUAL</string>
     <!-- The game's instruction manual (document), not "manual/by hand". -->
